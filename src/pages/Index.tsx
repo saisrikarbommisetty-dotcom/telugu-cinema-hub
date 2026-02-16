@@ -1,30 +1,59 @@
+import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import HeroCarousel from "@/components/HeroCarousel";
 import CategorySection from "@/components/CategorySection";
 import MobileNav from "@/components/MobileNav";
-import { movies } from "@/data/movies";
+import { supabase } from "@/integrations/supabase/client";
 
-const trendingMovies = movies.filter((m) => m.category.includes("trending"));
-const inTheatres = movies.filter((m) => m.category.includes("in-theatres"));
-const comingSoon = movies.filter((m) => m.category.includes("coming-soon"));
-const topRated = movies
-  .filter((m) => m.category.includes("top-rated"))
-  .sort((a, b) => (b.rating || 0) - (a.rating || 0));
+type DBMovie = {
+  id: string;
+  title: string;
+  genre: string;
+  language: string;
+  release_status: string;
+  description: string | null;
+  poster_url: string | null;
+  availability_status: string;
+};
 
 const Index = () => {
+  const [movies, setMovies] = useState<DBMovie[]>([]);
+
+  useEffect(() => {
+    const fetchMovies = async () => {
+      const { data } = await supabase
+        .from("movies")
+        .select("id, title, genre, language, release_status, description, poster_url, availability_status");
+      if (data) setMovies(data);
+    };
+    fetchMovies();
+
+    // Realtime subscription for seat availability updates
+    const channel = supabase
+      .channel("movies-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "movies" }, () => {
+        fetchMovies();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  const nowShowing = movies.filter((m) => m.release_status === "Now Showing");
+  const comingSoon = movies.filter((m) => m.release_status === "Coming Soon");
+
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Header />
       <HeroCarousel />
 
       <div className="mt-2">
-        <CategorySection title="🔥 Trending Now" movies={trendingMovies} />
-        <CategorySection title="🎬 In Theatres" movies={inTheatres} />
+        <CategorySection title="🔥 Trending Now" movies={nowShowing} />
+        <CategorySection title="🎬 In Theatres" movies={nowShowing} />
         <CategorySection title="🎥 Coming Soon" movies={comingSoon} />
-        <CategorySection title="⭐ Top Rated Telugu" movies={topRated} />
+        <CategorySection title="⭐ Top Rated Telugu" movies={movies} />
       </div>
 
-      {/* Tagline banner */}
       <section className="py-12 md:py-16">
         <div className="container text-center">
           <h2 className="font-display text-3xl md:text-5xl text-gradient-hero mb-3">

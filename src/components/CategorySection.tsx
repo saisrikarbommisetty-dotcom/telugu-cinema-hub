@@ -2,11 +2,20 @@ import { useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "framer-motion";
 import MovieCard from "./MovieCard";
-import { Movie } from "@/data/movies";
+
+type DBMovie = {
+  id: string;
+  title: string;
+  genre: string;
+  language: string;
+  release_status: string;
+  description: string | null;
+  poster_url: string | null;
+};
 
 interface CategorySectionProps {
   title: string;
-  movies: Movie[];
+  movies: DBMovie[];
 }
 
 const CategorySection = ({ title, movies }: CategorySectionProps) => {
@@ -34,16 +43,10 @@ const CategorySection = ({ title, movies }: CategorySectionProps) => {
             {title}
           </motion.h2>
           <div className="hidden md:flex gap-2">
-            <button
-              onClick={() => scroll("left")}
-              className="bg-secondary hover:bg-secondary/80 text-foreground p-1.5 rounded-full transition-colors"
-            >
+            <button onClick={() => scroll("left")} className="bg-secondary hover:bg-secondary/80 text-foreground p-1.5 rounded-full transition-colors">
               <ChevronLeft size={18} />
             </button>
-            <button
-              onClick={() => scroll("right")}
-              className="bg-secondary hover:bg-secondary/80 text-foreground p-1.5 rounded-full transition-colors"
-            >
+            <button onClick={() => scroll("right")} className="bg-secondary hover:bg-secondary/80 text-foreground p-1.5 rounded-full transition-colors">
               <ChevronRight size={18} />
             </button>
           </div>

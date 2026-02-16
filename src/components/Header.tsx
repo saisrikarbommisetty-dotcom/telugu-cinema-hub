@@ -1,10 +1,15 @@
-import { Search, Bell } from "lucide-react";
+import { Search, Bell, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const Header = () => {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-b from-background via-background/80 to-transparent">
       <div className="container flex items-center justify-between py-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
           <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
             <span className="text-primary-foreground font-display text-lg leading-none">T</span>
           </div>
@@ -15,11 +20,7 @@ const Header = () => {
 
         <nav className="hidden md:flex items-center gap-8">
           {["Home", "Movies", "Theatres", "Coming Soon"].map((item) => (
-            <a
-              key={item}
-              href="#"
-              className="text-muted-foreground hover:text-foreground text-sm font-medium transition-colors"
-            >
+            <a key={item} href="#" className="text-muted-foreground hover:text-foreground text-sm font-medium transition-colors">
               {item}
             </a>
           ))}
@@ -29,12 +30,27 @@ const Header = () => {
           <button className="text-muted-foreground hover:text-foreground transition-colors">
             <Search size={20} />
           </button>
-          <button className="text-muted-foreground hover:text-foreground transition-colors hidden md:block">
-            <Bell size={20} />
-          </button>
-          <button className="bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold px-4 py-2 rounded-lg transition-colors hidden md:block">
-            Sign In
-          </button>
+          {user ? (
+            <>
+              <span className="text-muted-foreground text-sm hidden md:block truncate max-w-[120px]">
+                {user.email}
+              </span>
+              <button
+                onClick={signOut}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Sign Out"
+              >
+                <LogOut size={20} />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => navigate("/auth")}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </div>
     </header>
