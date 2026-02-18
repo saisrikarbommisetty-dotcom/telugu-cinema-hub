@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Minus, Plus, Check, Loader2, MapPin } from "lucide-react";
+import { X, Check, Loader2, MapPin, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import SeatMap from "./SeatMap";
 
 type Showtime = {
   id: string;
@@ -34,12 +35,10 @@ type BookingModalProps = {
   onClose: () => void;
 };
 
-const TICKET_PRICE = 250;
-
 const getShowtimeStatus = (available: number, total: number) => {
-  if (available === 0) return "sold-out";
-  if (available / total < 0.15) return "almost-full";
-  return "available";
+  if (available === 0) return "sold-out" as const;
+  if (available / total < 0.15) return "almost-full" as const;
+  return "available" as const;
 };
 
 const ShowtimePill = ({
@@ -75,21 +74,28 @@ const ShowtimePill = ({
   );
 };
 
+// Steps: "theaters" → "seats" → "processing" → "success"
+type BookingStep = "theaters" | "seats" | "processing" | "success";
+
 const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProps) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
   const [selectedShowtime, setSelectedShowtime] = useState<string | null>(null);
-  const [seats, setSeats] = useState(1);
-  const [bookingState, setBookingState] = useState<"idle" | "processing" | "success">("idle");
+  const [ticketCount, setTicketCount] = useState(2);
+  const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
+  const [totalPrice, setTotalPrice] = useState(0);
+  const [step, setStep] = useState<BookingStep>("theaters");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isOpen && movieId) {
       fetchShowtimes();
       setSelectedShowtime(null);
-      setSeats(1);
-      setBookingState("idle");
+      setTicketCount(2);
+      setSelectedSeatIds([]);
+      setTotalPrice(0);
+      setStep("theaters");
     }
   }, [isOpen, movieId]);
 
@@ -112,23 +118,34 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
     if (!st.theaters) return acc;
     let theater = acc.find((t) => t.id === st.theaters!.id);
     if (!theater) {
-      theater = {
-        id: st.theaters.id,
-        name: st.theaters.name,
-        city: st.theaters.city,
-        total_seats: st.theaters.total_seats,
-        showtimes: [],
-      };
+      theater = { id: st.theaters.id, name: st.theaters.name, city: st.theaters.city, total_seats: st.theaters.total_seats, showtimes: [] };
       acc.push(theater);
     }
-    theater.showtimes.push({
-      id: st.id,
-      show_date: st.show_date,
-      show_time: st.show_time,
-      available_seats: st.available_seats,
-    });
+    theater.showtimes.push({ id: st.id, show_date: st.show_date, show_time: st.show_time, available_seats: st.available_seats });
     return acc;
   }, []);
+
+  const selectedShow = showtimes.find((s) => s.id === selectedShowtime);
+
+  const handleShowtimeSelect = (id: string) => {
+    setSelectedShowtime(id);
+    setSelectedSeatIds([]);
+    setTotalPrice(0);
+    setTicketCount(2);
+  };
+
+  const handleProceedToSeats = () => {
+    if (!selectedShowtime) {
+      toast.error("Please select a showtime");
+      return;
+    }
+    setStep("seats");
+  };
+
+  const handleSeatSelectionChange = (seats: string[], price: number) => {
+    setSelectedSeatIds(seats);
+    setTotalPrice(price);
+  };
 
   const handleBook = async () => {
     if (!user) {
@@ -137,26 +154,30 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
       navigate("/auth");
       return;
     }
-    if (!selectedShowtime) {
-      toast.error("Please select a showtime");
+    if (selectedSeatIds.length === 0) {
+      toast.error("Please select your seats");
+      return;
+    }
+    if (selectedSeatIds.length !== ticketCount) {
+      toast.error(`Please select exactly ${ticketCount} seat(s)`);
       return;
     }
 
-    setBookingState("processing");
+    setStep("processing");
 
     try {
       const { error: seatError } = await supabase.rpc("decrement_seats", {
-        p_showtime_id: selectedShowtime,
-        p_seats: seats,
+        p_showtime_id: selectedShowtime!,
+        p_seats: selectedSeatIds.length,
       });
       if (seatError) throw seatError;
 
       const { error: bookingError } = await supabase.from("bookings").insert({
         user_id: user.id,
         movie_id: movieId,
-        showtime_id: selectedShowtime,
-        seats_selected: seats,
-        total_amount: seats * TICKET_PRICE,
+        showtime_id: selectedShowtime!,
+        seats_selected: selectedSeatIds.length,
+        total_amount: totalPrice,
         payment_status: "Pending",
       });
       if (bookingError) throw bookingError;
@@ -168,7 +189,7 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
         .from("bookings")
         .select("id")
         .eq("user_id", user.id)
-        .eq("showtime_id", selectedShowtime)
+        .eq("showtime_id", selectedShowtime!)
         .eq("payment_status", "Pending")
         .order("created_at", { ascending: false })
         .limit(1);
@@ -177,25 +198,24 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
         await supabase.from("bookings").update({ payment_status: "Paid" }).eq("id", bookings[0].id);
       }
 
-      setBookingState("success");
-      toast.success(`🎬 ${seats} ticket(s) booked for ${movieTitle}!`, {
-        description: "Payment confirmed. Enjoy the movie!",
+      setStep("success");
+      toast.success(`🎬 ${selectedSeatIds.length} ticket(s) booked for ${movieTitle}!`, {
+        description: `Seats: ${selectedSeatIds.join(", ")} • ₹${totalPrice.toLocaleString()}`,
         duration: 5000,
       });
 
       setTimeout(() => {
-        setBookingState("idle");
+        setStep("theaters");
         setSelectedShowtime(null);
-        setSeats(1);
+        setSelectedSeatIds([]);
+        setTotalPrice(0);
         onClose();
-      }, 2000);
+      }, 2500);
     } catch (err: any) {
-      setBookingState("idle");
+      setStep("seats");
       toast.error(err.message || "Booking failed. Please try again.");
     }
   };
-
-  const selectedShow = showtimes.find((s) => s.id === selectedShowtime);
 
   if (!isOpen) return null;
 
@@ -217,138 +237,157 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="font-display text-2xl md:text-3xl text-foreground">
-                Theaters Showing <span className="text-primary">{movieTitle}</span>
-              </h2>
-              <p className="text-muted-foreground text-sm mt-1">Select a showtime to continue</p>
+            <div className="flex items-center gap-3">
+              {step === "seats" && (
+                <button onClick={() => setStep("theaters")} className="text-muted-foreground hover:text-foreground transition-colors">
+                  <ArrowLeft size={20} />
+                </button>
+              )}
+              <div>
+                <h2 className="font-display text-xl md:text-2xl text-foreground">
+                  {step === "theaters" && <>Theaters Showing <span className="text-primary">{movieTitle}</span></>}
+                  {step === "seats" && <>Select Your Seats</>}
+                  {step === "processing" && <>Processing...</>}
+                  {step === "success" && <>Confirmed!</>}
+                </h2>
+                {step === "theaters" && <p className="text-muted-foreground text-sm mt-0.5">Select a showtime to continue</p>}
+                {step === "seats" && selectedShow?.theaters && (
+                  <p className="text-muted-foreground text-sm mt-0.5">
+                    {selectedShow.theaters.name} • {selectedShow.show_time.slice(0, 5)}
+                  </p>
+                )}
+              </div>
             </div>
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
               <X size={24} />
             </button>
           </div>
 
-          {bookingState === "processing" ? (
+          {/* Step: Processing */}
+          {step === "processing" && (
             <div className="text-center py-16">
               <Loader2 className="w-14 h-14 text-primary animate-spin mx-auto mb-4" />
               <p className="text-foreground font-semibold text-lg">Processing Payment...</p>
               <p className="text-muted-foreground text-sm mt-1">Please wait while we confirm your booking</p>
             </div>
-          ) : bookingState === "success" ? (
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="text-center py-16"
-            >
+          )}
+
+          {/* Step: Success */}
+          {step === "success" && (
+            <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center py-16">
               <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Check className="w-8 h-8 text-green-500" />
               </div>
               <p className="text-foreground font-semibold text-lg">Booking Confirmed! 🎉</p>
               <p className="text-muted-foreground text-sm mt-1">
-                {seats} ticket(s) • ₹{(seats * TICKET_PRICE).toLocaleString()}
+                {selectedSeatIds.length} ticket(s) • Seats: {selectedSeatIds.join(", ")} • ₹{totalPrice.toLocaleString()}
               </p>
             </motion.div>
-          ) : (
+          )}
+
+          {/* Step: Theater selection */}
+          {step === "theaters" && (
             <>
               {/* Legend */}
               <div className="flex items-center gap-4 mb-5 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Available
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-primary" /> Almost Full
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-muted/50" /> Sold Out
-                </span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Available</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-primary" /> Almost Full</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-muted/50" /> Sold Out</span>
               </div>
 
-              {/* Theater list */}
               {loading ? (
-                <div className="text-center py-12">
-                  <Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" />
-                </div>
+                <div className="text-center py-12"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></div>
               ) : groupedTheaters.length === 0 ? (
                 <p className="text-center text-muted-foreground py-12">No showtimes available for this movie</p>
               ) : (
                 <div className="space-y-4 mb-6">
                   {groupedTheaters.map((theater) => (
-                    <motion.div
-                      key={theater.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="border border-border rounded-xl p-4 bg-secondary/30"
-                    >
+                    <motion.div key={theater.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="border border-border rounded-xl p-4 bg-secondary/30">
                       <div className="flex items-start justify-between mb-3">
                         <div>
                           <h3 className="text-foreground font-semibold text-base">{theater.name}</h3>
-                          <p className="text-muted-foreground text-xs flex items-center gap-1 mt-0.5">
-                            <MapPin size={12} /> {theater.city}
-                          </p>
+                          <p className="text-muted-foreground text-xs flex items-center gap-1 mt-0.5"><MapPin size={12} /> {theater.city}</p>
                         </div>
-                        <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded">
-                          2D
-                        </span>
+                        <span className="text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded">2D</span>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {theater.showtimes.map((st) => {
-                          const status = getShowtimeStatus(st.available_seats, theater.total_seats);
-                          return (
-                            <ShowtimePill
-                              key={st.id}
-                              time={st.show_time.slice(0, 5)}
-                              status={status}
-                              selected={selectedShowtime === st.id}
-                              onClick={() => {
-                                setSelectedShowtime(st.id);
-                                setSeats(1);
-                              }}
-                            />
-                          );
-                        })}
+                        {theater.showtimes.map((st) => (
+                          <ShowtimePill
+                            key={st.id}
+                            time={st.show_time.slice(0, 5)}
+                            status={getShowtimeStatus(st.available_seats, theater.total_seats)}
+                            selected={selectedShowtime === st.id}
+                            onClick={() => handleShowtimeSelect(st.id)}
+                          />
+                        ))}
                       </div>
                     </motion.div>
                   ))}
                 </div>
               )}
 
-              {/* Seat selector */}
+              {/* Ticket count + proceed */}
               {selectedShowtime && selectedShow && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="border-t border-border pt-5"
-                >
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="border-t border-border pt-5">
                   <div className="flex items-center justify-between mb-4">
-                    <p className="text-foreground font-medium">Number of Seats</p>
+                    <p className="text-foreground font-medium">How many tickets?</p>
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => setSeats(Math.max(1, seats - 1))}
-                        className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors"
+                        onClick={() => setTicketCount(Math.max(1, ticketCount - 1))}
+                        className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors text-lg font-bold"
                       >
-                        <Minus size={16} />
+                        −
                       </button>
-                      <span className="text-foreground font-bold text-xl w-8 text-center">{seats}</span>
+                      <span className="text-foreground font-bold text-xl w-8 text-center">{ticketCount}</span>
                       <button
-                        onClick={() => setSeats(Math.min(selectedShow.available_seats, seats + 1))}
-                        className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors"
+                        onClick={() => setTicketCount(Math.min(selectedShow.available_seats, Math.min(10, ticketCount + 1)))}
+                        className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-foreground hover:bg-secondary/80 transition-colors text-lg font-bold"
                       >
-                        <Plus size={16} />
+                        +
                       </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between mb-5">
-                    <p className="text-muted-foreground text-sm">Total Amount</p>
-                    <p className="text-foreground font-display text-3xl">₹{(seats * TICKET_PRICE).toLocaleString()}</p>
-                  </div>
-                  <button
-                    onClick={handleBook}
-                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3.5 rounded-xl transition-colors text-base"
-                  >
-                    Pay & Book Now
+                  <button onClick={handleProceedToSeats} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3.5 rounded-xl transition-colors text-base">
+                    Select Seats →
                   </button>
                 </motion.div>
               )}
+            </>
+          )}
+
+          {/* Step: Seat selection */}
+          {step === "seats" && selectedShow && (
+            <>
+              <SeatMap
+                totalSeats={selectedShow.theaters?.total_seats || 100}
+                availableSeats={selectedShow.available_seats}
+                maxSelect={ticketCount}
+                showtimeId={selectedShow.id}
+                onSelectionChange={handleSeatSelectionChange}
+              />
+
+              {/* Booking bar */}
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="border-t border-border pt-4 mt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-muted-foreground text-xs">Total Amount</p>
+                    <p className="text-foreground font-display text-2xl md:text-3xl">₹{totalPrice.toLocaleString()}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-muted-foreground text-xs">Seats</p>
+                    <p className="text-foreground text-sm font-medium">{selectedSeatIds.length > 0 ? selectedSeatIds.join(", ") : "None"}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleBook}
+                  disabled={selectedSeatIds.length !== ticketCount}
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3.5 rounded-xl transition-colors text-base disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {selectedSeatIds.length !== ticketCount
+                    ? `Select ${ticketCount - selectedSeatIds.length} more seat(s)`
+                    : `Pay ₹${totalPrice.toLocaleString()} & Book Now`}
+                </button>
+              </motion.div>
             </>
           )}
         </motion.div>
