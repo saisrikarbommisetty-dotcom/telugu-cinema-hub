@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Loader2, MapPin, ArrowLeft } from "lucide-react";
+import { X, Loader2, MapPin, ArrowLeft, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import SeatMap from "./SeatMap";
+import { format, addDays, isToday, isSameDay } from "date-fns";
 
 type Showtime = {
   id: string;
@@ -74,6 +75,40 @@ const ShowtimePill = ({
   );
 };
 
+const getNext7Days = () => {
+  const today = new Date();
+  return Array.from({ length: 7 }, (_, i) => addDays(today, i));
+};
+
+const DateChip = ({
+  date,
+  isSelected,
+  onClick,
+}: {
+  date: Date;
+  isSelected: boolean;
+  onClick: () => void;
+}) => {
+  const dayName = isToday(date) ? "Today" : format(date, "EEE");
+  const dayNum = format(date, "dd");
+  const month = format(date, "MMM");
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex-shrink-0 flex flex-col items-center px-4 py-2.5 rounded-xl transition-all duration-200 border-2 min-w-[68px] ${
+        isSelected
+          ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/30"
+          : "bg-secondary/40 text-muted-foreground border-border hover:border-primary/40 hover:bg-secondary/60 cursor-pointer"
+      }`}
+    >
+      <span className="text-[10px] font-medium uppercase tracking-wider">{dayName}</span>
+      <span className="text-lg font-bold leading-tight">{dayNum}</span>
+      <span className="text-[10px] font-medium uppercase">{month}</span>
+    </button>
+  );
+};
+
 // Steps: "theaters" → "seats"
 type BookingStep = "theaters" | "seats";
 
@@ -87,6 +122,9 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
   const [totalPrice, setTotalPrice] = useState(0);
   const [step, setStep] = useState<BookingStep>("theaters");
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const dateStripRef = useRef<HTMLDivElement>(null);
+  const dates = useMemo(() => getNext7Days(), []);
 
   useEffect(() => {
     if (isOpen && movieId) {
@@ -96,8 +134,17 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
       setSelectedSeatIds([]);
       setTotalPrice(0);
       setStep("theaters");
+      setSelectedDate(new Date());
     }
   }, [isOpen, movieId]);
+
+  const handleDateSelect = (date: Date) => {
+    setSelectedDate(date);
+    setSelectedShowtime(null);
+    setSelectedSeatIds([]);
+    setTotalPrice(0);
+    setTicketCount(2);
+  };
 
   const fetchShowtimes = async () => {
     setLoading(true);
@@ -114,7 +161,11 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
     setLoading(false);
   };
 
-  const groupedTheaters: GroupedTheater[] = showtimes.reduce<GroupedTheater[]>((acc, st) => {
+  const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+
+  const filteredShowtimes = showtimes.filter((st) => st.show_date === selectedDateStr);
+
+  const groupedTheaters: GroupedTheater[] = filteredShowtimes.reduce<GroupedTheater[]>((acc, st) => {
     if (!st.theaters) return acc;
     let theater = acc.find((t) => t.id === st.theaters!.id);
     if (!theater) {
@@ -224,6 +275,27 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
           {/* Step: Theater selection */}
           {step === "theaters" && (
             <>
+              {/* Date Strip */}
+              <div className="mb-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <CalendarDays size={14} className="text-primary" />
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Select Date</span>
+                </div>
+                <div
+                  ref={dateStripRef}
+                  className="flex gap-2 overflow-x-auto scrollbar-hide pb-1"
+                >
+                  {dates.map((date) => (
+                    <DateChip
+                      key={date.toISOString()}
+                      date={date}
+                      isSelected={isSameDay(date, selectedDate)}
+                      onClick={() => handleDateSelect(date)}
+                    />
+                  ))}
+                </div>
+              </div>
+
               {/* Legend */}
               <div className="flex items-center gap-4 mb-5 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Available</span>
@@ -234,7 +306,7 @@ const BookingModal = ({ movieId, movieTitle, isOpen, onClose }: BookingModalProp
               {loading ? (
                 <div className="text-center py-12"><Loader2 className="w-6 h-6 text-primary animate-spin mx-auto" /></div>
               ) : groupedTheaters.length === 0 ? (
-                <p className="text-center text-muted-foreground py-12">No showtimes available for this movie</p>
+                <p className="text-center text-muted-foreground py-12">No shows available on {format(selectedDate, "MMM dd")}. Try another date.</p>
               ) : (
                 <div className="space-y-4 mb-6">
                   {groupedTheaters.map((theater) => (
