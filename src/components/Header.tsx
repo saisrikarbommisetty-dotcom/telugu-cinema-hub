@@ -1,4 +1,4 @@
-import { Search, Bell, LogOut } from "lucide-react";
+import { Search, Bell, LogOut, Ticket } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
@@ -32,6 +32,13 @@ const Header = () => {
           </button>
           {user ? (
             <>
+              <button
+                onClick={() => navigate("/my-bookings")}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="My Bookings"
+              >
+                <Ticket size={20} />
+              </button>
               <span className="text-muted-foreground text-sm hidden md:block truncate max-w-[120px]">
                 {user.email}
               </span>
