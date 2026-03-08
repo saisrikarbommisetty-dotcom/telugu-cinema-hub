@@ -19,20 +19,29 @@ type DBMovie = {
 const Index = () => {
   const [movies, setMovies] = useState<DBMovie[]>([]);
 
+  const [error, setError] = useState(false);
+
   useEffect(() => {
-    const fetchMovies = async () => {
-      const { data } = await supabase
-        .from("movies")
-        .select("id, title, genre, language, release_status, description, poster_url, availability_status");
-      if (data) setMovies(data);
+    const fetchMovies = async (retries = 3) => {
+      for (let i = 0; i < retries; i++) {
+        const { data, error: err } = await supabase
+          .from("movies")
+          .select("id, title, genre, language, release_status, description, poster_url, availability_status");
+        if (!err && data) {
+          setMovies(data);
+          setError(false);
+          return;
+        }
+        if (i < retries - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      }
+      setError(true);
     };
     fetchMovies();
 
-    // Realtime subscription for seat availability updates
     const channel = supabase
       .channel("movies-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "movies" }, () => {
-        fetchMovies();
+        fetchMovies(1);
       })
       .subscribe();
 

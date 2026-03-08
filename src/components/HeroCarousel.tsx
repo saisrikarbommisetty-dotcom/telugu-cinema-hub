@@ -33,13 +33,19 @@ const HeroCarousel = () => {
   const [bookingMovie, setBookingMovie] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
-    const fetchMovies = async () => {
-      const { data } = await supabase
-        .from("movies")
-        .select("id, title, genre, language, release_status, description, poster_url")
-        .eq("release_status", "Now Showing")
-        .limit(4);
-      if (data) setMovies(data);
+    const fetchMovies = async (retries = 3) => {
+      for (let i = 0; i < retries; i++) {
+        const { data, error } = await supabase
+          .from("movies")
+          .select("id, title, genre, language, release_status, description, poster_url")
+          .eq("release_status", "Now Showing")
+          .limit(4);
+        if (!error && data) {
+          setMovies(data);
+          return;
+        }
+        if (i < retries - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      }
     };
     fetchMovies();
   }, []);
