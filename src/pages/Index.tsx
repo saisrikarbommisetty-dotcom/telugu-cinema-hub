@@ -1,24 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import HeroCarousel from "@/components/HeroCarousel";
 import CategorySection from "@/components/CategorySection";
 import MobileNav from "@/components/MobileNav";
 import { supabase } from "@/integrations/supabase/client";
-
-type DBMovie = {
-  id: string;
-  title: string;
-  genre: string;
-  language: string;
-  release_status: string;
-  description: string | null;
-  poster_url: string | null;
-  availability_status: string;
-};
+import {
+  getInitialMovies,
+  saveMoviesToCache,
+  type MovieRecord,
+} from "@/lib/movieDataFallback";
 
 const Index = () => {
-  const [movies, setMovies] = useState<DBMovie[]>([]);
-
+  const [movies, setMovies] = useState<MovieRecord[]>(() => getInitialMovies());
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -27,15 +20,21 @@ const Index = () => {
         const { data, error: err } = await supabase
           .from("movies")
           .select("id, title, genre, language, release_status, description, poster_url, availability_status");
-        if (!err && data) {
+
+        if (!err && data?.length) {
           setMovies(data);
+          saveMoviesToCache(data);
           setError(false);
           return;
         }
+
         if (i < retries - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
       }
+
       setError(true);
+      setMovies((currentMovies) => (currentMovies.length ? currentMovies : getInitialMovies()));
     };
+
     fetchMovies();
 
     const channel = supabase
@@ -45,7 +44,9 @@ const Index = () => {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const nowShowing = movies.filter((m) => m.release_status === "Now Showing");
@@ -55,6 +56,14 @@ const Index = () => {
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Header />
       <HeroCarousel />
+
+      {error && (
+        <div className="container mt-4">
+          <p className="text-sm text-muted-foreground">
+            Live movie feed is temporarily unavailable. Showing saved listings.
+          </p>
+        </div>
+      )}
 
       <div className="mt-2">
         <CategorySection title="🔥 Trending Now" movies={nowShowing} />

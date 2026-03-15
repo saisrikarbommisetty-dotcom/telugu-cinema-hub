@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import BookingModal from "./BookingModal";
+import { getInitialNowShowingMovies, type MovieRecord } from "@/lib/movieDataFallback";
 
 // Local poster fallbacks mapped by movie title
 import kalkiPoster from "@/assets/kalki-poster.jpg";
@@ -17,18 +18,8 @@ const posterMap: Record<string, string> = {
   "Pushpa 2: The Rule": pushpa2Poster,
 };
 
-type DBMovie = {
-  id: string;
-  title: string;
-  genre: string;
-  language: string;
-  release_status: string;
-  description: string | null;
-  poster_url: string | null;
-};
-
 const HeroCarousel = () => {
-  const [movies, setMovies] = useState<DBMovie[]>([]);
+  const [movies, setMovies] = useState<MovieRecord[]>(() => getInitialNowShowingMovies(4));
   const [current, setCurrent] = useState(0);
   const [bookingMovie, setBookingMovie] = useState<{ id: string; title: string } | null>(null);
 
@@ -40,13 +31,18 @@ const HeroCarousel = () => {
           .select("id, title, genre, language, release_status, description, poster_url")
           .eq("release_status", "Now Showing")
           .limit(4);
-        if (!error && data) {
+
+        if (!error && data?.length) {
           setMovies(data);
           return;
         }
+
         if (i < retries - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
       }
+
+      setMovies((currentMovies) => (currentMovies.length ? currentMovies : getInitialNowShowingMovies(4)));
     };
+
     fetchMovies();
   }, []);
 
@@ -58,10 +54,16 @@ const HeroCarousel = () => {
     return () => clearInterval(timer);
   }, [movies.length]);
 
+  useEffect(() => {
+    if (current >= movies.length && movies.length > 0) {
+      setCurrent(0);
+    }
+  }, [current, movies.length]);
+
   if (movies.length === 0) return <div className="h-[70vh] bg-background" />;
 
   const movie = movies[current];
-  const poster = posterMap[movie.title] || movie.poster_url || "";
+  const poster = posterMap[movie.title] || movie.poster_url || "/placeholder.svg";
 
   return (
     <>
@@ -75,7 +77,14 @@ const HeroCarousel = () => {
             transition={{ duration: 0.8 }}
             className="absolute inset-0"
           >
-            <img src={poster} alt={movie.title} className="w-full h-full object-cover object-top" />
+            <img
+              src={poster}
+              alt={movie.title}
+              className="w-full h-full object-cover object-top"
+              onError={(event) => {
+                event.currentTarget.src = "/placeholder.svg";
+              }}
+            />
           </motion.div>
         </AnimatePresence>
 

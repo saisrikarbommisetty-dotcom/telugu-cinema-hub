@@ -39,7 +39,7 @@ type MovieCardProps = {
 
 const MovieCard = ({ movie, index }: MovieCardProps) => {
   const [bookingOpen, setBookingOpen] = useState(false);
-  const poster = posterMap[movie.title] || movie.poster_url || "";
+  const poster = posterMap[movie.title] || movie.poster_url || "/placeholder.svg";
 
   return (
     <>
@@ -56,6 +56,9 @@ const MovieCard = ({ movie, index }: MovieCardProps) => {
             alt={movie.title}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
             loading="lazy"
+            onError={(event) => {
+              event.currentTarget.src = "/placeholder.svg";
+            }}
           />
           <div className="absolute inset-0 bg-background/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-3">
             <button
